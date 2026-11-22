@@ -1,0 +1,9 @@
+# Colar DENTRO da lista "tables = [ ... ]" em infra/inventories/dev/terraform.tfvars
+# (connector_events_add_partition > connector_events_add_partition_1 > data_table > tables),
+# logo depois do item de tblo5_consentimento_personalizacao. Coloque uma VIRGULA
+# depois do "}" do item anterior.
+          {
+            table_name     = "tblo5046_limi_opel_flxl"
+            location       = "s3://itau-corp-sor-sa-east-1-435988583578/tblo5046_limi_opel_flxl"
+            partition_keys = ["ano", "mes", "dia"]
+          }
