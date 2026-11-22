@@ -1,0 +1,7 @@
+*.mp4
+*.zip
+*.wav
+WhatsApp*/
+.claude/
+.terraform/
+*.tfstate*
