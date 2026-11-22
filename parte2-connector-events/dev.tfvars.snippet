@@ -1,0 +1,30 @@
+# Colar DENTRO do mapa connector_events em infra/inventories/dev/terraform.tfvars
+# (ao lado da entrada existente connector_template_sns)
+    tblo5046_limi_opel_flxl = {
+      type_connector = "sns"
+      # SNS topic
+      sns_topic = {
+        event_sns_subscription_topic_name         = "lo5-data-ingestion-topic"
+        event_sns_subscription_filter_policy      = "{\"event_type\": [\"tblo5046_limi_opel_flxl\"]}"
+        event_sns_subscription_filter_policy_scope = "MessageAttributes"
+      }
+      # Kinesis Firehose
+      event = {
+        name                            = "delivery_stream_limites_tblo5046_limi_opel_flxl"
+        role_name                       = "iamsr/lo5-datamesh-execution-role"
+        buffer_interval                 = 60
+        buffer_size                     = 128
+        enable_dynamic_partitioning     = false
+        timestamp_partition_field_name  = "event_timestamp"
+      }
+      # Table
+      data_table = {
+        database_name = "db_source_fraudeepld_limitesoperacionais_sor_01"
+        table = {
+          table_name     = "tblo5046_limi_opel_flxl"
+          location       = "s3://itau-corp-sor-sa-east-1-435988583578/tblo5046_limi_opel_flxl"
+          partition_keys = ["ano","mes","dia"]
+        }
+        catalog_id = "773683090477"
+      }
+    }
