@@ -4,7 +4,6 @@ resource "aws_glue_catalog_table" "tblo5046_limi_opel_flxl" {
   name          = "tblo5046_limi_opel_flxl"
   table_type    = "EXTERNAL_TABLE"
   parameters = {
-    EXTERNAL       = "TRUE"
     classification = "parquet"
   }
   retention = 0
@@ -14,7 +13,7 @@ resource "aws_glue_catalog_table" "tblo5046_limi_opel_flxl" {
     output_format             = "org.apache.hadoop.hive.ql.io.parquet.MapredParquetOutputFormat"
     compressed                = false
     stored_as_sub_directories = false
-    location                  = "${var.sor_s3bucket}/tblo5046_limi_opel_flxl"
+    location                  = "${var.sor_s3bucket}/tblo5046_limi_opel_flxl/"
 
     ser_de_info {
       serialization_library = "org.apache.hadoop.hive.ql.io.parquet.serde.ParquetHiveSerDe"
