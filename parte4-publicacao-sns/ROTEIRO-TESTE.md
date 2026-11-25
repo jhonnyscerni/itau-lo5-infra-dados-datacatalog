@@ -23,6 +23,27 @@ SNS `lo5-data-ingestion-topic` → Firehose `delivery_stream_limites_tblo5046_li
 
 > Confirme na console que o tópico está mesmo na conta de dev; ajuste o ARN se não estiver.
 
+## 0.1 Validação só com a conta produtora (sem acesso à conta de controle)
+
+Quem tem acesso apenas à conta **`435908583578`** consegue validar o fluxo inteiro — só o catálogo (Glue/Athena) fica na conta de controle `773683090477`.
+
+| # | O que confere | Onde (console da conta 3578) | Esperado |
+|---|---|---|---|
+| 1 | Parte 1 aplicada (tabela existe) | **CloudTrail → Event history** → Event name = `CreateTable` | Evento sem `errorCode`, com `catalogId: 773683090477` e `tableInput.name: tblo5046_limi_opel_flxl` |
+| 1b | Permissão Lake Formation | **CloudTrail → Event history** → Event name = `GrantPermissions` | Evento sem `errorCode` |
+| 2 | Parte 2: assinatura SNS → Firehose | **SNS → Topics → `lo5-data-ingestion-topic` → Subscriptions** | Assinatura `firehose` → `delivery_stream_limites_tblo5046_limi_opel_flxl`, filtro `event_type` |
+| 3 | Publicação | **SNS → Publish message** (seção 2.1) | Banner verde com Message ID |
+| 4 | Firehose recebeu e entregou | **Amazon Data Firehose → `delivery_stream_limites_tblo5046_limi_opel_flxl` → Monitoring** | *Incoming records* e *Delivery to S3 success* > 0 |
+| 5 | Arquivo no S3 | **S3 → `itau-corp-sor-sa-east-1-435908583578` → `tblo5046_limi_opel_flxl/`** | `.parquet` novo ~60s depois |
+| 6 | Parte 3: partição criada | **Step Functions → `lo5-datamesh-addpartition-sfn` → Executions** | Execução após a hora cheia = *Succeeded* |
+| 7 | Nada na DLQ | **SQS → DLQ da fila `lo5-datamesh-addpartiton-phoenix`** | 0 mensagens |
+
+> **O passo 5 é a prova principal:** o Firehose converte JSON → Parquet **lendo o schema da tabela no Glue da conta de controle**. Se o `.parquet` aparecer no prefixo normal, a tabela existe e a permissão do Lake Formation funciona. Se a tabela/permissão estivesse errada, o registro iria para um prefixo de erro (`errors/` / `format-conversion-failed/`) e o alarme `DataFormatConversionFailed` dispararia.
+
+**Fica de fora sem a conta de controle:** ver tabela/partições no Glue e consultar no Athena. Para isso, pedir ao time de plataforma Data Mesh `DESCRIBE` (e `SELECT`) no Lake Formation da conta `773683090477` para a **sua role** (nome visível no canto superior direito da console, em `role/<NOME>/...`), ou pedir que alguém de lá rode o `SHOW PARTITIONS`.
+
+> **Por que a conta 7736…?** O Data Mesh separa dados e catálogo: o S3/Firehose/SNS/SQS/Step Function ficam na conta produtora (`435908583578` em dev) e a definição da tabela + permissões ficam na conta de controle (`773683090477` em dev, `827556317157` em hom, `973136190634` em prod). Por isso a tabela não aparece no Glue da conta 3578 — só via resource link e com permissão no Lake Formation.
+
 ## 1. Conferir a assinatura do SNS
 
 ```bash
@@ -104,6 +125,8 @@ aws s3 ls --recursive s3://itau-corp-sor-sa-east-1-435908583578/tblo5046_limi_op
 ```
 
 **Esperado:** arquivo novo em `.../ano=2026/mes=11/dia=25/...` (ou no formato de prefixo usado pela `tblo5_consentimento_personalizacao`).
+
+> **Antes do teste o prefixo não existe — é normal.** Criar a tabela no Glue não cria nada no S3 (o Glue só guarda o metadado/`location`), e no S3 não existem pastas de verdade: o "diretório" `tblo5046_limi_opel_flxl/` só aparece quando o **primeiro arquivo** é gravado pelo Firehose. O bucket `itau-corp-sor-sa-east-1-435908583578` em si já deve existir (é o mesmo da `tblo5_consentimento_personalizacao`). Se não aparecer na lista de buckets, pode ser falta de `s3:ListAllMyBuckets` — abrir direto: `https://s3.console.aws.amazon.com/s3/buckets/itau-corp-sor-sa-east-1-435908583578?region=sa-east-1`.
 
 Se não aparecer em até 5 minutos → seção **Troubleshooting**.
 
