@@ -116,7 +116,7 @@ Console na conta de **dev**, região **São Paulo (sa-east-1)**:
 
 > **Por que o corpo vai "puro":** a assinatura do Firehose tem `raw_message_delivery = true`, então o SNS entrega **só o corpo** ao Firehose. O envelope com `Message` / `MessageAttributes` / `TopicArn` da especificação é o formato da chamada de API, não o que se digita na console. O `event_type` **não** vai dentro do JSON — se for, o filtro não enxerga e a mensagem é descartada.
 >
-> Se nada chegar no S3: no tópico, aba **Monitoring**, métrica **NumberOfNotificationsFilteredOut**. Se subiu, o problema está no atributo `event_type`.
+> Se nada chegar no S3: o tópico SNS **não tem aba Monitoring** — as métricas ficam em **CloudWatch → Metrics → All metrics → SNS → Topic Metrics** → `lo5-data-ingestion-topic` (Statistic `Sum`, Period `1 minute`, intervalo 1h). Olhar `NumberOfMessagesPublished` (não subiu = publicou em outro tópico/conta), `NumberOfNotificationsFilteredOut` (subiu = problema no atributo `event_type`), `NumberOfNotificationsFailed` (subiu = permissão da role da assinatura no Firehose) e `NumberOfNotificationsDelivered` (subiu = chegou no Firehose).
 
 ## 3. Conferir o arquivo no S3 (~60s depois — `buffer_interval`)
 
@@ -232,7 +232,7 @@ aws sns publish --region sa-east-1 \
 | Sintoma | Onde olhar | Causa provável |
 |---|---|---|
 | `publish` dá `AuthorizationError` | IAM da role usada | falta `sns:Publish` no tópico (4.3) |
-| Nada chega no S3 | métrica `NumberOfNotificationsFilteredOut` do tópico | `event_type` diferente do filtro |
+| Nada chega no S3 | CloudWatch → Metrics → SNS → Topic Metrics → `NumberOfNotificationsFilteredOut` / `Failed` / `Delivered` | `FilteredOut` = `event_type` diferente do filtro; `Failed` = permissão da role da assinatura |
 | Nada chega no S3 | log group `Phoenix-events/delivery_stream_limites_tblo5046_limi_opel_flxl` | erro de entrega do Firehose |
 | Alarme `DataFormatConversionFailed` | logs do Firehose | JSON fora do schema do Glue (nome/tipo de campo) |
 | Alarme `KMSKeyAccessDenied` | logs do Firehose | role sem acesso à chave KMS do bucket |
