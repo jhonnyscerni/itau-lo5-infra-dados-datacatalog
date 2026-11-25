@@ -116,7 +116,79 @@ Console na conta de **dev**, região **São Paulo (sa-east-1)**:
 
 > **Por que o corpo vai "puro":** a assinatura do Firehose tem `raw_message_delivery = true`, então o SNS entrega **só o corpo** ao Firehose. O envelope com `Message` / `MessageAttributes` / `TopicArn` da especificação é o formato da chamada de API, não o que se digita na console. O `event_type` **não** vai dentro do JSON — se for, o filtro não enxerga e a mensagem é descartada.
 >
-> Se nada chegar no S3: o tópico SNS **não tem aba Monitoring** — as métricas ficam em **CloudWatch → Metrics → All metrics → SNS → Topic Metrics** → `lo5-data-ingestion-topic` (Statistic `Sum`, Period `1 minute`, intervalo 1h). Olhar `NumberOfMessagesPublished` (não subiu = publicou em outro tópico/conta), `NumberOfNotificationsFilteredOut` (subiu = problema no atributo `event_type`), `NumberOfNotificationsFailed` (subiu = permissão da role da assinatura no Firehose) e `NumberOfNotificationsDelivered` (subiu = chegou no Firehose).
+> Se nada chegar no S3: o tópico SNS **não tem aba Monitoring** — as métricas ficam em **CloudWatch → Métricas → Métricas clássicas → SNS → Topic Metrics** → `lo5-data-ingestion-topic` (Statistic `Sum`, Period `1 minute`, intervalo 1h). Detalhes na seção **2.2**. Olhar `NumberOfMessagesPublished` (não subiu = publicou em outro tópico/conta), `NumberOfNotificationsFilteredOut` (subiu = problema no atributo `event_type`), `NumberOfNotificationsFailed` (subiu = permissão da role da assinatura no Firehose) e `NumberOfNotificationsDelivered` (subiu = chegou no Firehose).
+
+### 2.2 Publiquei — e agora? (onde a mensagem parou)
+
+A mensagem percorre: **publicação → tópico SNS → filtro `event_type` → entrega ao Firehose → S3**. Conferir na ordem; cada passo responde uma pergunta.
+
+#### 2.2.1 Métricas do tópico SNS
+
+O tópico **não tem aba Monitoring**. Duas formas:
+
+- **Console:** CloudWatch → **Métricas → Métricas clássicas** (era "All metrics") → **SNS → Topic Metrics** → filtrar `lo5-data-ingestion-topic` → marcar as 4 métricas → **Soma (Sum)**, período **1 minuto**, intervalo **3h**.
+- **CloudShell** (ícone `>_` no topo da console, conta 3578, sa-east-1) — mais rápido:
+
+```bash
+for m in NumberOfMessagesPublished NumberOfNotificationsFilteredOut NumberOfNotificationsFailed NumberOfNotificationsDelivered; do
+  echo "== $m"
+  aws cloudwatch get-metric-statistics --region sa-east-1 \
+    --namespace AWS/SNS --metric-name $m \
+    --dimensions Name=TopicName,Value=lo5-data-ingestion-topic \
+    --start-time $(date -u -d '-3 hours' +%Y-%m-%dT%H:%M:%SZ) \
+    --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
+    --period 300 --statistics Sum \
+    --query "Datapoints[].[Timestamp,Sum]" --output text
+done
+```
+
+| # | Métrica | Conta | No teste deveria ser |
+|---|---|---|---|
+| ① | `NumberOfMessagesPublished` | mensagens que chegaram no tópico | **≥ 1** |
+| ② | `NumberOfNotificationsFilteredOut` | descartadas pelo filtro da assinatura | **0** |
+| ③ | `NumberOfNotificationsDelivered` | entregues ao Firehose | **≥ 1** |
+| ④ | `NumberOfNotificationsFailed` | entregas que falharam | **0** |
+
+> O tópico recebe mensagens de outras tabelas também — olhar o **horário** da sua publicação.
+
+| Combinação | Significa | Ação |
+|---|---|---|
+| ① = 0 | não chegou no tópico | publicou em outro tópico/conta/região — publicar de dentro de SNS → `lo5-data-ingestion-topic` |
+| ① ≥ 1 e ② ≥ 1 | filtro descartou | corrigir Message attribute (`String` / `event_type` / `tblo5046_limi_opel_flxl`) |
+| ① ≥ 1 e ④ ≥ 1 | SNS não conseguiu entregar ao Firehose | permissão da role da assinatura (`iamsr/lo5-datamesh-execution-role`: `firehose:PutRecord`/`PutRecordBatch`) |
+| ① ≥ 1 e ③ ≥ 1 | **chegou no Firehose** | problema (se houver) está depois → 2.2.2 |
+| ① ≥ 1 e ②③④ = 0 | nenhuma assinatura pegou | aba **Subscriptions** do tópico: assinatura `firehose` existe e está `Confirmed`? |
+
+#### 2.2.2 Para onde o Firehose grava
+
+```bash
+aws firehose describe-delivery-stream --region sa-east-1 \
+  --delivery-stream-name delivery_stream_limites_tblo5046_limi_opel_flxl \
+  --query "DeliveryStreamDescription.Destinations[0].ExtendedS3DestinationDescription.[BucketARN,Prefix,ErrorOutputPrefix]" \
+  --output text
+```
+
+Ou console: **Amazon Data Firehose → `delivery_stream_limites_tblo5046_limi_opel_flxl` → Configuration → Destination settings** (S3 bucket, *S3 bucket prefix*, *S3 bucket error output prefix*).
+
+Procurar o arquivo no S3 **exatamente nesses dois caminhos** — o módulo pode usar um prefixo diferente de `tblo5046_limi_opel_flxl/`.
+
+Métricas do Firehose (essa tela **tem** aba **Monitoring**, intervalo 3h): *Incoming records* (recebeu), *Delivery to Amazon S3 success* (gravou), falhas de *data format conversion* (conversão).
+
+#### 2.2.3 Log do Firehose (se não achar o arquivo nos dois caminhos)
+
+```bash
+aws logs filter-log-events --region sa-east-1 \
+  --log-group-name "Phoenix-events/delivery_stream_limites_tblo5046_limi_opel_flxl" \
+  --start-time $(( ($(date +%s) - 10800) * 1000 )) \
+  --query "events[].message" --output text | head -40
+```
+
+| Erro no log | Causa |
+|---|---|
+| `DataFormatConversion...` / `The schema is invalid` / Glue `AccessDenied` | Firehose não leu a tabela no Glue central — permissão Lake Formation da role da pipeline |
+| `could not be parsed` / `Unable to deserialize` | JSON não bate com o schema (tipo de campo) |
+| `S3.AccessDenied` / `KMS.AccessDeniedException` | role não grava no bucket / não usa a chave KMS |
+| nada no log | ainda no buffer — esperar alguns minutos |
 
 ## 3. Conferir o arquivo no S3 (~60s depois — `buffer_interval`)
 
@@ -128,7 +200,16 @@ aws s3 ls --recursive s3://itau-corp-sor-sa-east-1-435908583578/tblo5046_limi_op
 
 > **Antes do teste o prefixo não existe — é normal.** Criar a tabela no Glue não cria nada no S3 (o Glue só guarda o metadado/`location`), e no S3 não existem pastas de verdade: o "diretório" `tblo5046_limi_opel_flxl/` só aparece quando o **primeiro arquivo** é gravado pelo Firehose. O bucket `itau-corp-sor-sa-east-1-435908583578` em si já deve existir (é o mesmo da `tblo5_consentimento_personalizacao`). Se não aparecer na lista de buckets, pode ser falta de `s3:ListAllMyBuckets` — abrir direto: `https://s3.console.aws.amazon.com/s3/buckets/itau-corp-sor-sa-east-1-435908583578?region=sa-east-1`.
 
-Se não aparecer em até 5 minutos → seção **Troubleshooting**.
+**Conferir em qual caminho o arquivo caiu:**
+
+| Caminho | Significa |
+|---|---|
+| prefixo **normal** (`tblo5046_limi_opel_flxl/...`), arquivo **`.parquet`** | ✅ sucesso — o Firehose leu o schema no Glue central, converteu e gravou (prova tabela + permissão da pipeline + conector + filtro) |
+| prefixo de **erro** (`error` / `failed` / `format-conversion-failed` no caminho) | ❌ conversão falhou — abrir o arquivo (JSON com o motivo) ou ver o log (2.2.3) |
+
+Anotar o **caminho completo** do arquivo: mostra o formato real das partições.
+
+Se não aparecer em até 5 minutos → seção **2.2** e **Troubleshooting**.
 
 ## 4. Conferir as partições no Glue (após a próxima hora cheia)
 
@@ -207,14 +288,64 @@ SHOW PARTITIONS db_source_fraudeepld_limitesoperacionais_sor_01.tblo5046_limi_op
 
 ## 5. Consultar no Athena
 
+> Requer **DESCRIBE + SELECT no Lake Formation** da conta de controle para a **sua role** (ver 5.3). Sem isso a tabela não aparece.
+
+### 5.1 Passo a passo (console da conta 3578, sa-east-1)
+
+1. **Amazon Athena → Query editor**.
+2. **Workgroup** (canto superior direito): usar o do time (LO5/Data Mesh) se existir — já vem com local de resultados e permissões.
+3. Se aparecer aviso de **query result location**: **Settings → Manage** → *Location of query result* = um caminho S3 da sua conta onde você possa gravar (bucket com "athena"/"query-results" no nome) → **Save**.
+4. Painel esquerdo: **Data source** = `AwsDataCatalog`; **Database** = o do **resource link** (valor de `sor_db_name_resource_link` no tfvars de dev do datacatalog). O `db_source_fraudeepld_limitesoperacionais_sor_01` existe só na conta de controle.
+5. Rodar (com o database selecionado não precisa prefixar):
+
 ```sql
+SHOW TABLES;
+SHOW PARTITIONS tblo5046_limi_opel_flxl;
+
 SELECT *
-FROM db_source_fraudeepld_limitesoperacionais_sor_01.tblo5046_limi_opel_flxl
+FROM tblo5046_limi_opel_flxl
 WHERE ano = 2026 AND mes = 11 AND dia = 25
   AND cod_idef_pess = 'TESTE-0001';
 ```
 
 **Esperado:** 1 linha com todos os campos preenchidos e `vlr_sltd = 100.50`.
+
+### 5.2 Problemas comuns no Athena
+
+| Sintoma | Causa | Solução |
+|---|---|---|
+| Botão **Run** desabilitado | sem *query result location*; workgroup errado/desabilitado; editor vazio ou sem database | configurar o local de resultados (passo 3); trocar o workgroup; selecionar o database |
+| `Table not found` / `SHOW TABLES` sem a tabela | Lake Formation **esconde** tabelas sem `DESCRIBE` (não diz "acesso negado") ou database errado | conferir o database (resource link, não `default`); pedir acesso (5.3) |
+| `SHOW TABLES` vazio — **nem a `tblo5_consentimento_personalizacao`** aparece | sua role não tem permissão em **nada** do database | pedir acesso ao **database** (5.3) |
+| aparece a `consentimento` mas não a `tblo5046` | permissão só nas tabelas antigas | pedir acesso só na tabela nova |
+| `Insufficient Lake Formation permission(s)` | falta `SELECT` | pedir acesso (5.3) |
+| `SHOW PARTITIONS` vazio / `SELECT` sem linhas | add-partition ainda não rodou | esperar hora cheia; ver Step Function |
+| linha com campos **nulos** | chave do JSON ≠ nome da coluna | corrigir payload |
+
+### 5.3 Pedido de acesso (time de plataforma Data Mesh)
+
+O acesso é concedido no Lake Formation da **conta de controle** — não dá para liberar pela conta 3578.
+
+> Olá! Preciso de permissão **DESCRIBE** e **SELECT** no Lake Formation da conta de controle **`773683090477`** (dev) para o database **`db_source_fraudeepld_limitesoperacionais_sor_01`** — incluindo as tabelas `tblo5046_limi_opel_flxl` e `tblo5_consentimento_personalizacao` — para a minha role **`<NOME_DA_ROLE>`** na conta **`435908583578`**.
+> Objetivo: consultar via Athena (resource link `<VALOR_DE_sor_db_name_resource_link>`) para validar a ingestão da nova tabela em dev.
+
+**`<NOME_DA_ROLE>`:** canto superior direito da console → clicar no usuário → trecho depois de `assumed-role/` (ou `role/`) até a próxima `/`. Não pedir para a `lo5-datamesh-execution-role` (é a role da pipeline).
+
+> Também é possível não ter acesso nenhum à conta de controle pelo portal SSO — é o normal para devs; o caminho é o resource link + permissão no Lake Formation.
+
+### 5.4 Alternativa sem Athena: ler o próprio Parquet
+
+1. S3 → selecionar o `.parquet` → **Download**.
+2. Abrir localmente:
+
+```python
+import pandas as pd
+print(pd.read_parquet("arquivo.parquet"))
+```
+
+ou DuckDB: `SELECT * FROM 'arquivo.parquet';`
+
+Mostra se os campos foram convertidos corretamente (não prova a partição no Glue — para isso, Step Function *Succeeded*).
 
 ## 6. Teste negativo do filtro (opcional)
 
@@ -243,6 +374,23 @@ aws sns publish --region sa-east-1 \
 ## Limpeza
 
 O registro `TESTE-0001` fica na tabela de dev. Se precisar remover, apague o objeto no S3 do prefixo correspondente (confirme com o time antes, pois é tabela governada).
+
+## Registro do teste em dev (2026-11-25)
+
+| Etapa | Status | Prova |
+|---|---|---|
+| Parte 1 — tabela + permissão da pipeline | ✅ | CloudTrail `CreateTable` sem `errorCode` (2 eventos) |
+| Parte 2 — SNS → Firehose | ✅ | `NumberOfMessagesPublished` = 1, `NumberOfNotificationsDelivered` = 1 |
+| Firehose → S3 | ✅ | arquivo no bucket `itau-corp-sor-sa-east-1-435908583578` |
+| Parte 3 — partição | ⏳ | Step Function `lo5-datamesh-addpartition-sfn` *Succeeded* após hora cheia |
+| Athena | ⏳ | bloqueado: role pessoal sem DESCRIBE/SELECT no Lake Formation (nem `consentimento` aparece) — pedido 5.3 |
+
+**Problemas encontrados no deploy (para não repetir):**
+- `permissions.tf`: `depends_on = [aws_glue_catalog_tblo5046_limi_opel_fxl]` → `Invalid reference`. Correto: `[aws_glue_catalog_table.tblo5046_limi_opel_flxl]` (faltava `_table.` e `fxl` ≠ `flxl`).
+- connector-events: conta errada na `location` (`435988583578`) → `S3 Bucket ... does not exist`. Correto: dev `435908583578`, prod `159000176689`.
+- connector-events: trocar a chave do mapa (`tblo5046...` → `connector_tblo5046...`) depois de um apply parcial → `ResourceAlreadyExistsException: The specified log group already exists` (cria o novo e destrói o antigo em paralelo, mesmo nome). Solução: re-run. **Não renomear chave de `for_each` depois de aplicar.**
+
+> O Athena não bloqueia a entrega: com a Step Function *Succeeded*, seguir com o merge para hom/prod e usar o Athena como conferência final quando o acesso sair.
 
 ## Depois de validar em dev
 
