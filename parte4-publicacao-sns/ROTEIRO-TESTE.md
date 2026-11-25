@@ -60,6 +60,43 @@ Regras do payload:
 - `event_timestamp` presente — é o campo de partição do Firehose.
 - `event_type` **idêntico** a `tblo5046_limi_opel_flxl` (qualquer diferença = mensagem descartada sem erro).
 
+### 2.1 Alternativa: publicar manualmente pela console da AWS
+
+Console na conta de **dev**, região **São Paulo (sa-east-1)**:
+
+1. **SNS → Topics → `lo5-data-ingestion-topic` → Publish message**.
+2. **Message details:** `Subject` e `Time to Live (TTL)` em branco.
+3. **Message body:**
+   - **Message structure:** `Identical payload for all delivery protocols`
+   - **Message body to send to the endpoint:** colar o JSON **puro** (sem envelope `"Message"`):
+
+   ```json
+   {
+     "cod_idef_pess": "TESTE-0001",
+     "num_unic_cont": "TESTE-0001",
+     "nom_situ_limi_flxl": "EM_ANDAMENTO",
+     "dat_hor_incu_rgto": "2026-11-25T10:00:00",
+     "dat_hor_expu": "2026-12-25T10:00:00",
+     "vlr_sltd": 100.50,
+     "des_moti": "teste etapa 4",
+     "des_ctto": "teste etapa 4",
+     "event_timestamp": "2026-11-25T10:00:00Z"
+   }
+   ```
+
+4. **Message attributes** (é aqui que o filtro da assinatura olha):
+
+   | Type | Name | Value |
+   |---|---|---|
+   | `String` | `event_type` | `tblo5046_limi_opel_flxl` |
+
+   - Type `String` (não `String.Array`), Value **sem aspas** e sem espaços sobrando.
+5. **Publish message** → deve aparecer o banner verde com o **Message ID**.
+
+> **Por que o corpo vai "puro":** a assinatura do Firehose tem `raw_message_delivery = true`, então o SNS entrega **só o corpo** ao Firehose. O envelope com `Message` / `MessageAttributes` / `TopicArn` da especificação é o formato da chamada de API, não o que se digita na console. O `event_type` **não** vai dentro do JSON — se for, o filtro não enxerga e a mensagem é descartada.
+>
+> Se nada chegar no S3: no tópico, aba **Monitoring**, métrica **NumberOfNotificationsFilteredOut**. Se subiu, o problema está no atributo `event_type`.
+
 ## 3. Conferir o arquivo no S3 (~60s depois — `buffer_interval`)
 
 ```bash
