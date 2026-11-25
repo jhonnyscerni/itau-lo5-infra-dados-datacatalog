@@ -123,6 +123,65 @@ aws glue get-partitions --region sa-east-1 \
 
 Para não esperar a hora cheia, dá para disparar a Step Function manualmente pela console (`lo5-datamesh-addpartition-sfn` → *Start execution*, reaproveitando o input da última execução agendada).
 
+### 4.1 Conferir no Glue pela console da AWS
+
+**Onde a tabela fica:** foi criada com `catalog_id = 773683090477` → está no catálogo da **conta de controle** (dev), **não** na conta de dev da LO5 (`435908583578`).
+
+| Conta logada | Onde procurar |
+|---|---|
+| `773683090477` (controle) | Glue → Databases → `db_source_fraudeepld_limitesoperacionais_sor_01` |
+| `435908583578` (dev LO5) | Glue → Databases → database do **resource link** (valor de `sor_db_name_resource_link` no tfvars de dev do datacatalog; aparece com ícone de link / "Shared resource") |
+| outra | conta errada |
+
+Região sempre **South America (São Paulo) sa-east-1**.
+
+**Tabela:**
+1. **AWS Glue → Data Catalog → Databases** → abrir o database da tabela acima.
+2. Em **Tables**, abrir **`tblo5046_limi_opel_flxl`**.
+3. Aba **Schema**: 8 colunas (`cod_idef_pess`, `num_unic_cont`, `nom_situ_limi_flxl`, `dat_hor_incu_rgto`, `dat_hor_expu`, `vlr_sltd` `decimal(10,2)`, `des_moti`, `des_ctto`) e partition keys `ano`, `mes`, `dia` (`int`).
+4. **Table details**: Location `s3://itau-corp-sor-sa-east-1-435908583578/tblo5046_limi_opel_flxl/`, Classification `parquet`.
+
+**Partições** (após o teste + hora cheia):
+1. Na tabela, aba **Partitions** (ou **View partitions**).
+2. Esperado: `ano=2026`, `mes=11`, `dia=25`.
+3. Vazio → conferir arquivo no S3 (passo 3); **Step Functions → `lo5-datamesh-addpartition-sfn` → Executions** (última deve estar *Succeeded*); se falhou, DLQ da fila `lo5-datamesh-addpartiton-phoenix` no **SQS**.
+
+**Permissão (Lake Formation, conta de controle):**
+**Lake Formation → Permissions → Data permissions** → filtrar Table = `tblo5046_limi_opel_flxl` → esperado: `lo5-datamesh-execution-role` com `SELECT`, `ALTER`, `INSERT`, `DESCRIBE`.
+
+#### Tabela não aparece na console
+
+Teste de controle: no mesmo lugar, a **`tblo5_consentimento_personalizacao`** aparece?
+
+- **Ela aparece e a nossa não** → a Parte 1 não foi aplicada nesse ambiente:
+  1. Repositório datacatalog → **Actions** → última execução da branch → no apply, procurar
+     `aws_glue_catalog_table.tblo5046_limi_opel_flxl: Creation complete` e
+     `aws_lakeformation_permissions.permissao_tblo5046_limi_opel_flxl: Creation complete`.
+  2. Se só rodou o plan (sem `Apply complete`), o apply ainda não aconteceu.
+  3. Em hom/prod a tabela só existe depois do **merge na `main`**.
+- **Ela também não aparece** → problema de **onde/como** se está olhando, não da tabela:
+  1. Conferir **conta e região** (tabela acima).
+  2. Na conta de dev, usar o database do **resource link**.
+  3. Se a conta está certa e mesmo assim nada aparece → **Lake Formation esconde tabelas sem `DESCRIBE`** para a sua role. Confirmar pelo **CloudShell**:
+
+     ```bash
+     aws glue get-tables --region sa-east-1 --catalog-id 773683090477 \
+       --database-name db_source_fraudeepld_limitesoperacionais_sor_01 \
+       --query "TableList[].Name"
+     ```
+
+     - `AccessDenied` / lista vazia → falta permissão para a sua role: pedir `DESCRIBE` no Lake Formation ao time/admin do Data Mesh (não usar a `lo5-datamesh-execution-role`, que é da pipeline).
+     - Lista as tabelas → elas existem; o problema é só a visualização na console.
+  4. Prova definitiva independente da console: o log `Creation complete` do apply da Parte 1.
+
+**Atalho pelo Athena** (se a tabela aparece no Glue):
+
+```sql
+SHOW PARTITIONS db_source_fraudeepld_limitesoperacionais_sor_01.tblo5046_limi_opel_flxl;
+```
+
+(na conta de dev, trocar pelo nome do database do resource link)
+
 ## 5. Consultar no Athena
 
 ```sql
