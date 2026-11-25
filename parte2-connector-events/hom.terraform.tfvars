@@ -30,7 +30,7 @@ connector_events = {
     # Caso deseje personalizar metricas de finops e alertas, verificar valores no arquivo variables.tf
   }
 
-  tblo5046_limi_opel_flxl = {
+  connector_tblo5046_limi_opel_flxl = {
     type_connector = "sns"
     # SNS topic
     sns_topic = {
