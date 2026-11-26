@@ -69,7 +69,7 @@ aws sns get-subscription-attributes --region sa-east-1 \
 ```bash
 aws sns publish --region sa-east-1 \
   --topic-arn arn:aws:sns:sa-east-1:435908583578:lo5-data-ingestion-topic \
-  --message '{"cod_idef_pess":"TESTE-0001","num_unic_cont":"TESTE-0001","nom_situ_limi_flxl":"EM_ANDAMENTO","dat_hor_incu_rgto":"2026-11-25T10:00:00","dat_hor_expu":"2026-12-25T10:00:00","vlr_sltd":100.50,"des_moti":"teste etapa 4","des_ctto":"teste etapa 4","event_timestamp":"2026-11-25T10:00:00Z"}' \
+  --message '{"cod_idef_pess":"TESTE-0001","dat_hor_incu_rgto":"2026-11-25T10:00:00","cod_idef_pend_forl":"TESTE-PEND-0001","dat_hor_expu":"2026-12-25T10:00:00","des_detl_moti_soli":"teste etapa 4 - detalhe","des_moti_soli":"teste etapa 4","nom_ctto_soli":"teste etapa 4","nom_situ_limi_flxl":"EM_ANDAMENTO","num_unic_cont":"TESTE-0001","vlr_sltd_clie":100.50,"event_timestamp":"2026-11-25T10:00:00Z"}' \
   --message-attributes '{"event_type":{"DataType":"String","StringValue":"tblo5046_limi_opel_flxl"}}'
 ```
 
@@ -77,7 +77,7 @@ aws sns publish --region sa-east-1 \
 
 Regras do payload:
 - Chaves = **nomes das colunas do Glue** (campo com nome diferente vira nulo no Parquet).
-- `vlr_sltd` como **número** (`decimal(10,2)`), não string.
+- `vlr_sltd_clie` como **número** (`decimal(10,2)`), não string.
 - `event_timestamp` presente — é o campo de partição do Firehose.
 - `event_type` **idêntico** a `tblo5046_limi_opel_flxl` (qualquer diferença = mensagem descartada sem erro).
 
@@ -94,13 +94,15 @@ Console na conta de **dev**, região **São Paulo (sa-east-1)**:
    ```json
    {
      "cod_idef_pess": "TESTE-0001",
-     "num_unic_cont": "TESTE-0001",
-     "nom_situ_limi_flxl": "EM_ANDAMENTO",
      "dat_hor_incu_rgto": "2026-11-25T10:00:00",
+     "cod_idef_pend_forl": "TESTE-PEND-0001",
      "dat_hor_expu": "2026-12-25T10:00:00",
-     "vlr_sltd": 100.50,
-     "des_moti": "teste etapa 4",
-     "des_ctto": "teste etapa 4",
+     "des_detl_moti_soli": "teste etapa 4 - detalhe",
+     "des_moti_soli": "teste etapa 4",
+     "nom_ctto_soli": "teste etapa 4",
+     "nom_situ_limi_flxl": "EM_ANDAMENTO",
+     "num_unic_cont": "TESTE-0001",
+     "vlr_sltd_clie": 100.50,
      "event_timestamp": "2026-11-25T10:00:00Z"
    }
    ```
@@ -242,7 +244,7 @@ Região sempre **South America (São Paulo) sa-east-1**.
 **Tabela:**
 1. **AWS Glue → Data Catalog → Databases** → abrir o database da tabela acima.
 2. Em **Tables**, abrir **`tblo5046_limi_opel_flxl`**.
-3. Aba **Schema**: 8 colunas (`cod_idef_pess`, `num_unic_cont`, `nom_situ_limi_flxl`, `dat_hor_incu_rgto`, `dat_hor_expu`, `vlr_sltd` `decimal(10,2)`, `des_moti`, `des_ctto`) e partition keys `ano`, `mes`, `dia` (`int`).
+3. Aba **Schema**: 10 colunas (`cod_idef_pess`, `dat_hor_incu_rgto`, `cod_idef_pend_forl`, `dat_hor_expu`, `des_detl_moti_soli`, `des_moti_soli`, `nom_ctto_soli`, `nom_situ_limi_flxl`, `num_unic_cont`, `vlr_sltd_clie` `decimal(10,2)`) e partition keys `ano`, `mes`, `dia` (`int`).
 4. **Table details**: Location `s3://itau-corp-sor-sa-east-1-435908583578/tblo5046_limi_opel_flxl/`, Classification `parquet`.
 
 **Partições** (após o teste + hora cheia):
@@ -308,7 +310,7 @@ WHERE ano = 2026 AND mes = 11 AND dia = 25
   AND cod_idef_pess = 'TESTE-0001';
 ```
 
-**Esperado:** 1 linha com todos os campos preenchidos e `vlr_sltd = 100.50`.
+**Esperado:** 1 linha com todos os campos preenchidos e `vlr_sltd_clie = 100.50`.
 
 ### 5.2 Problemas comuns no Athena
 

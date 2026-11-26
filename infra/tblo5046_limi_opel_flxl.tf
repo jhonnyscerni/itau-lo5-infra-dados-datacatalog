@@ -28,9 +28,44 @@ resource "aws_glue_catalog_table" "tblo5046_limi_opel_flxl" {
     }
 
     columns {
-      name       = "num_unic_cont"
+      name       = "dat_hor_incu_rgto"
       type       = "string"
-      comment    = "Numero unico da conta"
+      comment    = "Data e hora de inclusao do registro"
+      parameters = {}
+    }
+
+    columns {
+      name       = "cod_idef_pend_forl"
+      type       = "string"
+      comment    = "Codigo identificador da pendencia de formalizacao"
+      parameters = {}
+    }
+
+    columns {
+      name       = "dat_hor_expu"
+      type       = "string"
+      comment    = "Data e hora de expiracao (TTL)"
+      parameters = {}
+    }
+
+    columns {
+      name       = "des_detl_moti_soli"
+      type       = "string"
+      comment    = "Descricao detalhada do motivo da solicitacao"
+      parameters = {}
+    }
+
+    columns {
+      name       = "des_moti_soli"
+      type       = "string"
+      comment    = "Descricao do motivo da solicitacao"
+      parameters = {}
+    }
+
+    columns {
+      name       = "nom_ctto_soli"
+      type       = "string"
+      comment    = "Nome do contato da solicitacao"
       parameters = {}
     }
 
@@ -42,37 +77,16 @@ resource "aws_glue_catalog_table" "tblo5046_limi_opel_flxl" {
     }
 
     columns {
-      name       = "dat_hor_incu_rgto"
+      name       = "num_unic_cont"
       type       = "string"
-      comment    = "Data e hora de inclusao do registro"
+      comment    = "Numero unico da conta"
       parameters = {}
     }
 
     columns {
-      name       = "dat_hor_expu"
-      type       = "string"
-      comment    = "Data e hora de expiracao"
-      parameters = {}
-    }
-
-    columns {
-      name       = "vlr_sltd"
+      name       = "vlr_sltd_clie"
       type       = "decimal(10,2)"
-      comment    = "Valor solicitado"
-      parameters = {}
-    }
-
-    columns {
-      name       = "des_moti"
-      type       = "string"
-      comment    = "Descricao do motivo"
-      parameters = {}
-    }
-
-    columns {
-      name       = "des_ctto"
-      type       = "string"
-      comment    = "Descricao do contexto"
+      comment    = "Valor solicitado pelo cliente"
       parameters = {}
     }
   }
